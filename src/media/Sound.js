@@ -77,10 +77,10 @@
 		/**
 		 * If sound is enabled. This will only be false if Sound was unable to initialize
 		 * a SoundJS plugin.
-		 * @property {Boolean} soundEnabled
+		 * @property {Boolean} isSupported
 		 * @readOnly
 		 */
-		this.soundEnabled = true;
+		this.isSupported = true;
 
 		/**
 		 * If sound is currently muted by the system. This will only be true on iOS until
@@ -90,6 +90,15 @@
 		 * @readOnly
 		 */
 		this.systemMuted = createjs.BrowserDetect.isIOS;
+
+		/**
+		 * If preventDefault should be called on the interaction event that unmutes the audio.
+		 * In most cases (games) you would want to leave this, but for a website you may want
+		 * to disable it.
+		 * @property {Boolean} preventDefaultOnUnmute
+		 * @default true
+		 */
+		this.preventDefaultOnUnmute = true;
 	};
 
 	/**
@@ -101,6 +110,57 @@
 	//Reference to the prototype
 	var s = EventDispatcher.prototype;
 	var p = EventDispatcher.extend(Sound);
+
+	function _fixAudioContext()
+	{
+		var activePlugin = SoundJS.activePlugin;
+		//save audio data
+		var _audioSources = activePlugin._audioSources;
+		var _soundInstances = activePlugin._soundInstances;
+		var _loaders = activePlugin._loaders;
+
+		//close old context
+		if (WebAudioPlugin.context.close)
+			WebAudioPlugin.context.close();
+
+		var AudioContext = window.AudioContext || window.webkitAudioContext;
+		// Reset context
+		WebAudioPlugin.context = new AudioContext();
+
+		// Reset WebAudioPlugin
+		WebAudioPlugin.call(activePlugin);
+
+		// Copy over relevant properties
+		activePlugin._loaders = _loaders;
+		activePlugin._audioSources = _audioSources;
+		activePlugin._soundInstances = _soundInstances;
+
+		//update any playing instances to not have references to old audio nodes
+		//while we could go through all of the springroll.Sound instances, it's probably
+		//faster to go through SoundJS's stuff, as well as catching any cases where a
+		//naughty person went over springroll.Sound's head and played audio through SoundJS
+		//directly
+		for (var url in _soundInstances)
+		{
+			var instances = _soundInstances[url];
+			for (var i = 0; i < instances.length; ++i)
+			{
+				var instance = instances[i];
+				//clean up old nodes
+				instance.panNode.disconnect(0);
+				instance.gainNode.disconnect(0);
+				//make brand new nodes
+				instance.gainNode = WebAudioPlugin.context.createGain();
+				instance.panNode = WebAudioPlugin.context.createPanner();
+				instance.panNode.panningModel = WebAudioPlugin._panningModel;
+				instance.panNode.connect(instance.gainNode);
+				instance._updatePan();
+				//double check that the position is a valid thing
+				if (instance._position < 0 || instance._position === undefined)
+					instance._position = 0;
+			}
+		}
+	}
 
 	var _instance = null;
 
@@ -166,10 +226,15 @@
 		//playback pretty much has to be createjs.WebAudioPlugin for iOS
 		//We cannot use touchstart in iOS 9.0 - http://www.holovaty.com/writing/ios9-web-audio/
 		if (createjs.BrowserDetect.isIOS &&
-			SoundJS.activePlugin instanceof WebAudioPlugin)
+			SoundJS.activePlugin instanceof WebAudioPlugin &&
+			SoundJS.activePlugin.context.state != "running")
 		{
+			document.addEventListener("touchstart", _playEmpty);
 			document.addEventListener("touchend", _playEmpty);
+			document.addEventListener("mousedown", _playEmpty);
 		}
+		else
+			this.systemMuted = false;
 
 		//New sound object
 		_instance = new Sound();
@@ -204,7 +269,7 @@
 			{
 				Debug.error("Unable to initialize SoundJS with a plugin!");
 			}
-			this.soundEnabled = false;
+			_instance.isSupported = false;
 			if (options.ready)
 			{
 				options.ready();
@@ -221,11 +286,19 @@
 	 */
 	function _playEmpty(ev)
 	{
-		ev.preventDefault();
-		document.removeEventListener("touchend", _playEmpty);
 		WebAudioPlugin.playEmptySound();
-		_instance.systemMuted = false;
-		_instance.trigger("systemUnmuted");
+		if (WebAudioPlugin.context.state == "running" ||
+			WebAudioPlugin.context.state === undefined)
+		{
+			if (_instance.preventDefaultOnUnmute)
+				ev.preventDefault();
+			document.removeEventListener("touchstart", _playEmpty);
+			document.removeEventListener("touchend", _playEmpty);
+			document.removeEventListener("mousedown", _playEmpty);
+
+			_instance.systemMuted = false;
+			_instance.trigger("systemUnmuted");
+		}
 	}
 
 	/**
@@ -253,6 +326,18 @@
 					break;
 				}
 			}
+		}
+		//if on Android, using WebAudioPlugin, and the userAgent does not signify Firefox,
+		//assume a Chrome based browser, so consider it a potential liability for the
+		//bug in Chrome where the AudioContext is not restarted after too much silence
+		this._fixAndroidAudio = createjs.BrowserDetect.isAndroid &&
+			SoundJS.activePlugin instanceof WebAudioPlugin &&
+			!(navigator.userAgent.indexOf("Gecko") > -1 &&
+				navigator.userAgent.indexOf("Firefox") > -1);
+		if (this._fixAndroidAudio)
+		{
+			this._numPlayingAudio = 0;
+			this._lastAudioTime = Date.now();
 		}
 
 		if (callback)
@@ -353,6 +438,38 @@
 		}
 		//return the Sound instance for chaining
 		return this;
+	};
+
+	/**
+	 * Links one or more sound contexts to another in a parent-child relationship, so
+	 * that the children can be controlled separately, but still be affected by
+	 * setContextMute(), stopContext(), pauseContext(), etc on the parent.
+	 * Note that sub-contexts are not currently affected by setContextVolume().
+	 * @method linkContexts
+	 * @param {String} parent The id of the SoundContext that should be the parent.
+	 * @param {String|Array} subContext The id of a SoundContext to add to parent as a
+	 *                                  sub-context, or an array of ids.
+	 * @return {Boolean} true if the sound exists, false otherwise.
+	 */
+	p.linkContexts = function(parent, subContext)
+	{
+		if (!this._contexts[parent])
+			this._contexts[parent] = new SoundContext(parent);
+		parent = this._contexts[parent];
+
+		if (Array.isArray(subContext))
+		{
+			for (var i = 0; i < subContext.length; ++i)
+			{
+				if (parent.subContexts.indexOf(subContext[i]) < 0)
+					parent.subContexts.push(subContext[i]);
+			}
+		}
+		else
+		{
+			if (parent.subContexts.indexOf(subContext) < 0)
+				parent.subContexts.push(subContext);
+		}
 	};
 
 	/**
@@ -576,9 +693,8 @@
 	p._update = function(elapsed)
 	{
 		var fades = this._fades;
-		var trim = 0;
 
-		var inst, time, sound, swapIndex, lerp, vol;
+		var inst, time, sound, lerp, vol;
 		for (var i = fades.length - 1; i >= 0; --i)
 		{
 			inst = fades[i];
@@ -597,12 +713,7 @@
 				{
 					inst.curVol = inst._fEnd;
 					inst.updateVolume();
-				}
-				++trim;
-				swapIndex = fades.length - trim;
-				if (i != swapIndex) //don't bother swapping if it is already last
-				{
-					fades[i] = fades[swapIndex];
+					fades.splice(i, 1);
 				}
 			}
 			else
@@ -620,7 +731,6 @@
 				inst.updateVolume();
 			}
 		}
-		fades.length = fades.length - trim;
 		if (fades.length === 0)
 		{
 			Application.instance.off("update", this._update);
@@ -655,8 +765,6 @@
 	 */
 	p.play = function(alias, options, startCallback, interrupt, delay, offset, loop, volume, pan)
 	{
-		if (!this.soundEnabled) return;
-
 		var completeCallback;
 		if (options && isFunction(options))
 		{
@@ -671,6 +779,15 @@
 		loop = (options ? options.loop : loop);
 		volume = (options ? options.volume : volume);
 		pan = (options ? options.pan : pan) || 0;
+
+		if (!this.isSupported)
+		{
+			if (completeCallback)
+			{
+				setTimeout(completeCallback, 0);
+			}
+			return;
+		}
 
 		//Replace with correct infinite looping.
 		if (loop === true)
@@ -702,6 +819,21 @@
 		var inst, arr;
 		if (loadState == LoadStates.loaded)
 		{
+			if (this._fixAndroidAudio)
+			{
+				if (this._numPlayingAudio)
+				{
+					this._numPlayingAudio++;
+					this._lastAudioTime = -1;
+				}
+				else
+				{
+					if (Date.now() - this._lastAudioTime >= 30000)
+						_fixAudioContext();
+					this._numPlayingAudio = 1;
+					this._lastAudioTime = -1;
+				}
+			}
 			//have Sound manage the playback of the sound
 			var channel = SoundJS.play(alias, interrupt, delay, offset, loop, volume, pan);
 
@@ -825,6 +957,14 @@
 		//If the sound was stopped before it finished loading, then don't play anything
 		if (!sound.playAfterLoad) return;
 
+		if (this._fixAndroidAudio)
+		{
+			if (this._lastAudioTime > 0 && Date.now() - this._lastAudioTime >= 30000)
+			{
+				_fixAudioContext();
+			}
+		}
+
 		//Go through the list of sound instances that are waiting to start and start them
 		var waiting = sound.waitingToPlay;
 
@@ -857,6 +997,20 @@
 			}
 			else
 			{
+				if (this._fixAndroidAudio)
+				{
+					if (this._numPlayingAudio)
+					{
+						this._numPlayingAudio++;
+						this._lastAudioTime = -1;
+					}
+					else
+					{
+						this._numPlayingAudio = 1;
+						this._lastAudioTime = -1;
+					}
+				}
+
 				sound.playing.push(inst);
 				inst._channel = channel;
 				if (channel.handleExtraData)
@@ -885,6 +1039,12 @@
 	{
 		if (inst._channel)
 		{
+			if (this._fixAndroidAudio)
+			{
+				if (--this._numPlayingAudio === 0)
+					this._lastAudioTime = Date.now();
+			}
+
 			inst._channel.removeEventListener("complete", inst._endFunc);
 			var sound = this._sounds[inst.alias];
 			var index = sound.playing.indexOf(inst);
@@ -949,6 +1109,11 @@
 	{
 		if (inst._channel)
 		{
+			if (!inst.paused && this._fixAndroidAudio)
+			{
+				if (--this._numPlayingAudio === 0)
+					this._lastAudioTime = Date.now();
+			}
 			inst._channel.removeEventListener("complete", inst._endFunc);
 			inst._channel.stop();
 		}
@@ -969,14 +1134,18 @@
 		if (context)
 		{
 			var arr = context.sounds;
-			var s;
-			for (var i = arr.length - 1; i >= 0; --i)
+			var s, i;
+			for (i = arr.length - 1; i >= 0; --i)
 			{
 				s = arr[i];
 				if (s.playing.length)
 					this._stopSound(s);
 				else if (s.loadState == LoadStates.loading)
 					s.playAfterLoad = false;
+			}
+			for (i = 0; i < context.subContexts.length; ++i)
+			{
+				this.stopContext(context.subContexts[i]);
 			}
 		}
 	};
@@ -1004,6 +1173,7 @@
 	{
 		if (isString(sound))
 			sound = this._sounds[sound];
+		isGlobal = !!isGlobal;
 		var arr = sound.playing;
 		var i;
 		for (i = arr.length - 1; i >= 0; --i)
@@ -1052,6 +1222,63 @@
 	};
 
 	/**
+	 * Pauses all sounds in a given context. Audio paused this way will not be resumed with
+	 * resumeAll(), but must be resumed individually or with resumeContext().
+	 * @method pauseContext
+	 * @param {String} context The name of the context to pause.
+	 */
+	p.pauseContext = function(context)
+	{
+		context = this._contexts[context];
+		if (context)
+		{
+			var arr = context.sounds;
+			var s, i;
+			for (i = arr.length - 1; i >= 0; --i)
+			{
+				s = arr[i];
+				var j;
+				for (j = s.playing.length - 1; j >= 0; --j)
+					s.playing[j].pause();
+				for (j = s.waitingToPlay.length - 1; j >= 0; --j)
+					s.waitingToPlay[j].pause();
+			}
+			for (i = 0; i < context.subContexts.length; ++i)
+			{
+				this.pauseContext(context.subContexts[i]);
+			}
+		}
+	};
+
+	/**
+	 * Resumes all sounds in a given context.
+	 * @method pauseContext
+	 * @param {String} context The name of the context to pause.
+	 */
+	p.resumeContext = function(context)
+	{
+		context = this._contexts[context];
+		if (context)
+		{
+			var arr = context.sounds;
+			var s, i;
+			for (i = arr.length - 1; i >= 0; --i)
+			{
+				s = arr[i];
+				var j;
+				for (j = s.playing.length - 1; j >= 0; --j)
+					s.playing[j].resume();
+				for (j = s.waitingToPlay.length - 1; j >= 0; --j)
+					s.waitingToPlay[j].resume();
+			}
+			for (i = 0; i < context.subContexts.length; ++i)
+			{
+				this.resumeContext(context.subContexts[i]);
+			}
+		}
+	};
+
+	/**
 	 * Pauses all sounds.
 	 * @method pauseAll
 	 * @public
@@ -1064,7 +1291,8 @@
 	};
 
 	/**
-	 * Unpauses all sounds.
+	 * Unpauses all sounds that were paused with pauseAll(). This does not unpause audio
+	 * that was paused individually or with pauseContext().
 	 * @method resumeAll
 	 * @public
 	 */
@@ -1073,6 +1301,27 @@
 		var arr = this._sounds;
 		for (var i in arr)
 			this.resume(arr[i], true);
+	};
+
+	p._onInstancePaused = function()
+	{
+		if (this._fixAndroidAudio)
+		{
+			if (--this._numPlayingAudio === 0)
+				this._lastAudioTime = Date.now();
+		}
+	};
+
+	p._onInstanceResume = function()
+	{
+		if (this._fixAndroidAudio)
+		{
+			if (this._lastAudioTime > 0 && Date.now() - this._lastAudioTime > 30000)
+				_fixAudioContext();
+
+			this._numPlayingAudio++;
+			this._lastAudioTime = -1;
+		}
 	};
 
 	/**
@@ -1091,8 +1340,8 @@
 			var volume = context.volume;
 			var arr = context.sounds;
 
-			var s, playing, j;
-			for (var i = arr.length - 1; i >= 0; --i)
+			var s, playing, j, i;
+			for (i = arr.length - 1; i >= 0; --i)
 			{
 				s = arr[i];
 				if (s.playing.length)
@@ -1103,6 +1352,10 @@
 						playing[j].updateVolume(muted ? 0 : volume);
 					}
 				}
+			}
+			for (i = 0; i < context.subContexts.length; ++i)
+			{
+				this.setContextMute(context.subContexts[i], muted);
 			}
 		}
 	};
@@ -1160,6 +1413,15 @@
 	 */
 	p.preload = function(list, callback)
 	{
+		if (!this.isSupported)
+		{
+			if (callback)
+			{
+				setTimeout(callback, 0);
+			}
+			return;
+		}
+
 		if (isString(list))
 		{
 			list = [list];

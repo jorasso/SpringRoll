@@ -1,4 +1,4 @@
-/*! SpringRoll 0.4.4 */
+/*! SpringRoll 0.4.22 */
 /**
  * @module Debug
  * @namespace springroll
@@ -612,8 +612,7 @@
 				case "object":
 					{
 						result[key] = (depth > maxDepth || circularArray.indexOf(value) > -1) ?
-							String(value) :
-							removeCircular(value, maxDepth, depth + 1);
+						String(value) : removeCircular(value, maxDepth, depth + 1);
 						break;
 					}
 				case "function":

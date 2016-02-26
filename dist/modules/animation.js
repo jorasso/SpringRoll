@@ -1,4 +1,4 @@
-/*! SpringRoll 0.4.4 */
+/*! SpringRoll 0.4.22 */
 /**
  * @module Animation
  * @namespace springroll
@@ -363,7 +363,11 @@
 		 */
 		try
 		{
-			_timelineMap = new Map();
+			//having a parameter causes an error in non-fully compliant implementations,
+			//like iOS 8.X - there is a serious issue that sometimes happens in iOS 8.0-8.2
+			//This prevents 8.3 from using the faster map, but beyond attempting to detect exactly
+			//which version of iOS is being used, there isn't much of a choice.
+			_timelineMap = new Map([]);
 			//ensure that all the Map features we need are supported
 			if (typeof _timelineMap.delete != "function" ||
 				typeof _timelineMap.has != "function" ||
@@ -629,7 +633,8 @@
 						start = audio.start > 0 ? audio.start * 0.001 : 0; //seconds
 						alias = audio.alias;
 					}
-					if (_app.sound.exists(alias))
+					if (_app.sound.isSupported && !_app.sound.systemMuted &&
+						_app.sound.exists(alias))
 					{
 						_app.sound.preload(alias);
 						animData.alias = alias;

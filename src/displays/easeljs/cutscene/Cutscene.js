@@ -354,7 +354,10 @@
 					this._activeSyncAudio.unshift(audio);
 					instanceRef.instance = audio;
 					audio._audioData = data;
-					this._soundStartTime = data.start;
+					//immediately walk back the elapsed time so that we sync to the audio
+					//and don't run into a situation where we are playing multiple synced
+					//audio that should not be simultaneous
+					this._elapsedTime = this._soundStartTime = data.start;
 
 					if (this._captions)
 					{
@@ -441,6 +444,7 @@
 		{
 			this._activeAudio[i].stop();
 		}
+		this._activeAudio.length = this._activeSyncAudio.length = 0;
 
 		if (this._captions)
 		{

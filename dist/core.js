@@ -1,4 +1,4 @@
-/*! SpringRoll 0.4.4 */
+/*! SpringRoll 0.4.22 */
 /**
  * @module Core
  * @namespace window
@@ -311,6 +311,43 @@
 			}
 		});
 	}
+
+	/**
+	 * Appends a list of items or list of arrays to the end of this array. This functions
+	 * like concat(), but works on the original array instead of making a copy.
+	 * @method append
+	 * @param {*} arguments A list of arrays or individual items.
+	 * @return {Array} This array.
+	 */
+	if (!Array.prototype.append)
+	{
+		Object.defineProperty(Array.prototype, "append",
+		{
+			enumerable: false,
+			writable: false,
+			value: function()
+			{
+				var args = arguments;
+				for (var i = 0, length = args.length; i < length; ++i)
+				{
+					var other = args[i];
+					if (Array.isArray(other))
+					{
+						for (var j = 0, jLength = other.length; j < jLength; ++j)
+						{
+							this.push(other[j]);
+						}
+					}
+					else
+					{
+						this.push(other);
+					}
+				}
+				return this;
+			}
+		});
+	}
+
 }(Array, Math, Object));
 /**
  * @module Core
@@ -1622,10 +1659,10 @@
 	{
 		/**
 		 * The collection of listeners
-		 * @property {Array} _listeners
+		 * @property {Object} _listeners
 		 * @private
 		 */
-		this._listeners = [];
+		this._listeners = {};
 
 		/**
 		 * If the dispatcher is destroyed
@@ -1661,7 +1698,7 @@
 	{
 		if (this._destroyed) return;
 
-		if (this._listeners[type] !== undefined)
+		if (this._listeners.hasOwnProperty(type) && (this._listeners[type] !== undefined))
 		{
 			// copy the listeners array
 			var listeners = this._listeners[type].slice();
@@ -1736,9 +1773,14 @@
 			for (var i = 0, nl = names.length; i < nl; i++)
 			{
 				n = names[i];
-				listener = this._listeners[n];
-				if (!listener)
+				if (this._listeners.hasOwnProperty(n))
+				{
+					listener = this._listeners[n];
+				}
+				else
+				{
 					listener = this._listeners[n] = [];
+				}
 
 				if (once)
 				{
@@ -1785,7 +1827,7 @@
 		// remove all
 		if (name === undefined)
 		{
-			this._listeners = [];
+			this._listeners = {};
 		}
 		// remove multiple callbacks
 		else if (Array.isArray(callback))
@@ -1804,9 +1846,10 @@
 			for (var i = 0, nl = names.length; i < nl; i++)
 			{
 				n = names[i];
-				listener = this._listeners[n];
-				if (listener)
+				if (this._listeners.hasOwnProperty(n))
 				{
+					listener = this._listeners[n];
+
 					// remove all listeners for that event
 					if (callback === undefined)
 					{
@@ -1837,7 +1880,7 @@
 	 */
 	p.has = function(name, callback)
 	{
-		if (!name) return false;
+		if (!name || !this._listeners.hasOwnProperty(name)) return false;
 
 		var listeners = this._listeners[name];
 		if (!listeners) return false;
@@ -2401,6 +2444,14 @@
 		//stuff?
 		setTimeout(this._preInit.bind(this), 0);
 	};
+
+	/**
+	 * The current version of the library
+	 * @property {String} version
+	 * @static
+	 * @readOnly
+	 */
+	Application.version = "0.4.22";
 
 	// Reference to the prototype
 	var s = EventDispatcher.prototype;
@@ -3329,7 +3380,7 @@
 				{
 					if (true)
 						throw "Filter " + replace +
-						" already exists in this._filters array.";
+							" already exists in this._filters array.";
 					else
 						throw "Filter already exists.";
 				}
@@ -3414,6 +3465,7 @@
 (function()
 {
 	var ApplicationPlugin = include('springroll.ApplicationPlugin');
+	var devicePixelRatio = include('devicePixelRatio', false);
 
 	/**
 	 * @class Application
@@ -3468,6 +3520,13 @@
 		normalHeight: 0
 	};
 
+	/**
+	 * The timeout when the window is being resized
+	 * @property {springroll.DelayedCall} _windowResizer
+	 * @private
+	 */
+	var _windowResizer = null;
+
 	// Init the animator
 	plugin.setup = function()
 	{
@@ -3521,6 +3580,13 @@
 		 * @default 'frame'
 		 */
 		options.add('resizeElement', 'frame', true);
+
+		/**
+		 * Whether to account for devicePixelRatio when rendering game
+		 * @property {Boolean} options.enableHiDPI
+		 * @default false
+		 */
+		options.add('enableHiDPI', false);
 
 		options.on('maxWidth', function(value)
 		{
@@ -3579,12 +3645,20 @@
 			var normalHeight = _resizeHelper.normalHeight;
 
 			var responsive = this.options.responsive;
+			var enableHiDPI = this.options.enableHiDPI;
 
 			//resize the displays
 			this.displays.forEach(function(display)
 			{
 				if (responsive)
 				{
+					if (enableHiDPI && devicePixelRatio)
+					{
+						display.canvas.style.width = width + "px";
+						display.canvas.style.height = height + "px";
+						width *= devicePixelRatio;
+						height *= devicePixelRatio;
+					}
 					// update the dimensions of the canvas
 					display.resize(width, height);
 				}
@@ -3594,6 +3668,11 @@
 					display.canvas.style.width = width + "px";
 					display.canvas.style.height = height + "px";
 
+					if (enableHiDPI && devicePixelRatio)
+					{
+						normalWidth *= devicePixelRatio;
+						normalHeight *= devicePixelRatio;
+					}
 					// Update the canvas size for maxWidth and maxHeight
 					display.resize(normalWidth, normalHeight);
 				}
@@ -3607,6 +3686,31 @@
 			{
 				display.render(0, true); // force renderer
 			});
+		};
+
+		/**
+		 * Handle the window resize events
+		 * @method onWindowResize
+		 * @protected
+		 */
+		this.onWindowResize = function()
+		{
+			// Call the resize once
+			this.triggerResize();
+
+			// After a short timeout, call the resize again
+			// this will solve issues where the window doesn't
+			// properly get the "full" resize, like on some mobile
+			// devices when pulling-down/releasing the HUD
+			_windowResizer = this.setTimeout(
+				function()
+				{
+					this.triggerResize();
+					_windowResizer = null;
+				}
+				.bind(this),
+				500
+			);
 		};
 
 		/**
@@ -3680,17 +3784,23 @@
 		if (options.resizeElement)
 		{
 			_resizeElement = options.resizeElement;
-			this.triggerResize = this.triggerResize.bind(this);
-			window.addEventListener("resize", this.triggerResize);
+			this.onWindowResize = this.onWindowResize.bind(this);
+			window.addEventListener("resize", this.onWindowResize);
 		}
 		done();
 	};
 
 	plugin.teardown = function()
 	{
+		if (_windowResizer)
+		{
+			_windowResizer.destroy();
+			_windowResizer = null;
+		}
+
 		if (_resizeElement)
 		{
-			window.removeEventListener("resize", this.triggerResize);
+			window.removeEventListener("resize", this.onWindowResize);
 		}
 		_resizeElement = null;
 
@@ -4788,6 +4898,7 @@
 		this.url = null;
 
 		this.removeAllEventListeners();
+		this.removeAll();
 		this.close();
 	};
 
@@ -5057,10 +5168,13 @@
 	 */
 	p.destroy = function()
 	{
-		this.itemPool.forEach(function(item)
+		if (this.itemPool)
 		{
-			item.clear();
-		});
+			this.itemPool.forEach(function(item)
+			{
+				item.clear();
+			});
+		}
 		this.itemPool = null;
 
 		if (this.cacheManager)
@@ -5784,6 +5898,11 @@
 		assets = applyDefaults(assets);
 
 		// Check for a task definition on the asset
+		// add default type for proper task recognition
+		if (assets.type === undefined && this.type)
+		{
+			assets.type = this.type;
+		}
 		var isSingle = this.getTaskByAsset(assets);
 
 		if (isSingle)
@@ -5793,6 +5912,11 @@
 		}
 		else
 		{
+			//if we added a default type for task recognition, remove it
+			if (assets.type === this.type && this.type)
+			{
+				delete assets.type;
+			}
 			var task;
 			if (Array.isArray(assets))
 			{
@@ -6686,7 +6810,7 @@
 		/**
 		 * The collection of assets to preload, can be individual
 		 * URLs or objects with keys `src`, `complete`, `progress`, etc. 
-		 * @property {String} options.preload
+		 * @property {String|Array|Object} options.preload
 		 * @default []
 		 */
 		options.add('preload', [], true);
@@ -6801,15 +6925,7 @@
 	 */
 	var addPreloadAssets = function(app, assets)
 	{
-		var preload = app.options.preload;
-
-		if (preload && preload.length)
-		{
-			preload.forEach(function(asset)
-			{
-				assets.push(asset);
-			});
-		}
+		assets.append(app.options.preload);
 
 		// Allow extending game to add additional tasks
 		app.trigger('loading', assets);
@@ -6943,23 +7059,6 @@
 		 */
 		this._visible = this.canvas.style.display != "none";
 
-		// prevent mouse down turning into text cursor
-		this.canvas.onmousedown = function(e)
-		{
-			e.preventDefault();
-		};
-
-		/**
-		 * The Animator class to use when using this display. Other modules
-		 * uses this to determine what Animator to use, for instance states
-		 * uses Animator when playing transition animations.
-		 * @property {Animator} animator
-		 * @readOnly
-		 * @public
-		 * @default null
-		 */
-		// this.animator = null;
-
 		/**
 		 * Some of the modules require a special display adapter to provide
 		 * common methods for managing display objects.
@@ -7090,7 +7189,6 @@
 	p.destroy = function()
 	{
 		this.enabled = false;
-		this.animator = null;
 		this.adapter = null;
 		this.stage = null;
 		if (this.canvas.parentNode)

@@ -87,7 +87,6 @@ The basic usage is to create a canvas element on the DOM, assign it an ID and th
 Modules are components which contain common code classes, documentation and/or related tools that can easily be bundled into a project. The goal of these modules is to provide convenient solutions to common problems producers face when authoring games. All modules are optional and located in the **dist/modules** folder, except the Core Module.
 
 * **[Core Module](https://github.com/SpringRoll/SpringRoll/wiki/Core-Module)** (required)
-* **[Container](https://github.com/SpringRoll/SpringRoll/wiki/Container)** _container_
 * **[Container Client Module](https://github.com/SpringRoll/SpringRoll/wiki/Container-Client-Module)** _container-client_
 * **[Captions Module](https://github.com/SpringRoll/SpringRoll/wiki/Captions-Module)** _captions_
 * **[Debug Module](https://github.com/SpringRoll/SpringRoll/wiki/Debug-Module)** _debug_
@@ -115,23 +114,22 @@ The Framework is inherently canvas-rendering agnostic. We support two different 
 
 ##Examples
 
-* [Basic Application](https://springroll.github.io/SpringRoll/examples/basic.html)
+* [Application](https://springroll.github.io/SpringRoll/examples/basic.html)
 * [Asset Loading &amp; Caching](https://springroll.github.io/SpringRoll/examples/asset-caching.html)
-* [Color-Alpha Image](https://springroll.github.io/SpringRoll/examples/color-alpha.html)
-* [Max Width](https://springroll.github.io/SpringRoll/examples/max-width.html)
-* [Responsive UI](https://springroll.github.io/SpringRoll/examples/ui.html)
+* [Color-Alpha](https://springroll.github.io/SpringRoll/examples/color-alpha.html)
+* [Max-Width](https://springroll.github.io/SpringRoll/examples/max-width.html)
+* [UI Scaling](https://springroll.github.io/SpringRoll/examples/ui.html)
 * [Cutscene](https://springroll.github.io/SpringRoll/examples/cutscene.html)
-* [Using TweenJS](https://springroll.github.io/SpringRoll/examples/tween.html)
-* [Adding and Playing Sound](https://springroll.github.io/SpringRoll/examples/sound.html)
-* [Basic Captions](https://springroll.github.io/SpringRoll/examples/captions.html)
+* [Tweening](https://springroll.github.io/SpringRoll/examples/tween.html)
+* [Sound](https://springroll.github.io/SpringRoll/examples/sound.html)
+* [Captions](https://springroll.github.io/SpringRoll/examples/captions.html)
 * [Captions &amp; Sound](https://springroll.github.io/SpringRoll/examples/captions-sound.html)
-* [Multi-Display Application](https://springroll.github.io/SpringRoll/examples/multiple-displays.html)
-* [Create States](https://springroll.github.io/SpringRoll/examples/states.html)
-* [Container](https://springroll.github.io/SpringRoll/examples/container.html)
+* [Multi-Display](https://springroll.github.io/SpringRoll/examples/multiple-displays.html)
+* [States](https://springroll.github.io/SpringRoll/examples/states.html)
 
 ##Documentation
 
-[API Documentation](http://springroll.github.io/SpringRoll/docs/) has full documentation for the core and related modules. For examples of implementing each module please consult the [wiki](https://github.com/SpringRoll/SpringRoll/wiki).
+[API Documentation](http://springroll.io/SpringRoll/docs/) has full documentation for the core and related modules. For examples of implementing each module please consult the [wiki](/SpringRoll/SpringRoll/wiki).
 
 ##License
 

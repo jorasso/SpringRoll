@@ -262,6 +262,7 @@
 		this.paused = true;
 		if (!this._channel) return;
 		this._channel.pause();
+		Sound.instance._onInstancePaused();
 	};
 
 	/**
@@ -274,7 +275,16 @@
 		if (!this.paused) return;
 		this.paused = false;
 		if (!this._channel) return;
+		Sound.instance._onInstanceResume();
 		this._channel.resume();
+		if (this._channel.gainNode)
+		{
+			//reset values on the channel to ensure that the volume update takes -
+			//the default volume on the audio after playing/resuming will be 1
+			this._channel._volume = -1;
+			this._channel.gainNode.gain.value = 0;
+		}
+		this.updateVolume();
 	};
 
 	namespace('springroll').SoundInstance = SoundInstance;

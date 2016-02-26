@@ -1,4 +1,4 @@
-/*! SpringRoll 0.4.4 */
+/*! SpringRoll 0.4.22 */
 /**
  * @module Container Client
  * @namespace springroll
@@ -7,7 +7,6 @@
 {
 	// Impor classes
 	var SavedData = include('springroll.SavedData');
-	var Application = include('springroll.Application');
 
 	/**
 	 * This class is responsible for saving the user-specific data
@@ -16,8 +15,9 @@
 	 * sessions of running an app.
 	 * @class UserData
 	 * @constructor
+	 * @param {Bellhop} container The container instance
 	 */
-	var UserData = function()
+	var UserData = function(container)
 	{
 		/**
 		 * Reference to the container. If the app is not connected
@@ -27,7 +27,7 @@
 		 * @default  null
 		 * @readOnly
 		 */
-		this.container = null;
+		this.container = container;
 
 		/**
 		 * The name to preprend to each property name, this is set
@@ -50,10 +50,9 @@
 	 */
 	p.read = function(prop, callback)
 	{
-		if (!this.container || !this.container.supported)
+		if (!this.container.supported)
 		{
-			var prefix = Application.instance.options.name || "";
-			return callback(SavedData.read(prefix + prop));
+			return callback(SavedData.read(this.id + prop));
 		}
 		this.container.fetch(
 			'userDataRead',
@@ -75,10 +74,9 @@
 	 */
 	p.write = function(prop, value, callback)
 	{
-		if (!this.container || !this.container.supported)
+		if (!this.container.supported)
 		{
-			var prefix = Application.instance.options.name || "";
-			SavedData.write(prefix + prop, value);
+			SavedData.write(this.id + prop, value);
 			if (callback) callback();
 			return;
 		}
@@ -104,10 +102,9 @@
 	 */
 	p.remove = function(prop, callback)
 	{
-		if (!this.container || !this.container.supported)
+		if (!this.container.supported)
 		{
-			var prefix = Application.instance.options.name || "";
-			SavedData.remove(prefix + prop);
+			SavedData.remove(this.id + prop);
 			if (callback) callback();
 			return;
 		}
@@ -128,6 +125,7 @@
 	 */
 	p.destroy = function()
 	{
+		this.id = null;
 		this.container = null;
 	};
 
@@ -150,33 +148,12 @@
 	/**
 	 * @class Application
 	 */
-	var plugin = new ApplicationPlugin(50);
+	var plugin = new ApplicationPlugin(200);
 
 	// Init the animator
 	plugin.setup = function()
 	{
 		var options = this.options;
-
-		/**
-		 * The default play-mode for the application is continuous, if the application is
-		 * running as part of a sequence is it considered in "single play" mode
-		 * and the application will therefore close itself.
-		 * @property {Boolean} options.singlePlay
-		 * @readOnly
-		 * @default false
-		 */
-		options.add('singlePlay', false, true);
-
-		/**
-		 * The optional play options to use if the application is played in "single play"
-		 * mode. These options are passed from the application container to specify
-		 * options that are used for this single play session. For instance,
-		 * if you want the single play to focus on a certain level or curriculum
-		 * such as `{ "shape": "square" }`
-		 * @property {Object} options.playOptions
-		 * @readOnly
-		 */
-		options.add('playOptions', null, true);
 
 		/**
 		 * Send a message to let the site know that this has
@@ -192,7 +169,7 @@
 		 * save user data to local cookies
 		 * @property {springroll.UserData} userData
 		 */
-		this.userData = new UserData();
+		this.userData = new UserData(container);
 
 		/**
 		 * This option tells the container to always keep focus on the iframe even
@@ -209,8 +186,11 @@
 		// When the preloading is done
 		this.once('beforeInit', function()
 		{
-			container.send('loadDone');
+			container.send('loaded');
 		});
+
+		// Send the first event
+		container.send('loading');
 
 		/**
 		 * The default play-mode for the application is continuous, if the application is
@@ -231,20 +211,23 @@
 		 * @property {Object} playOptions
 		 * @readOnly
 		 */
-		this.playOptions = null;
+		this.playOptions = {};
 
 		/**
 		 * When a application is in singlePlay mode it will end.
 		 * It's unnecessary to check `if (this.singlePlay)` just
 		 * call the method and it will end the application if it can.
 		 * @method singlePlayEnd
+		 * @return {Boolean} If endGame is called
 		 */
 		this.singlePlayEnd = function()
 		{
 			if (this.singlePlay)
 			{
 				this.endGame();
+				return true;
 			}
+			return false;
 		};
 
 		/**
@@ -258,17 +241,65 @@
 			this.destroy();
 		};
 
+		// Dispatch the features
+		this.once('beforeInit', function()
+		{
+			var hasSound = !!this.sound;
+
+			// Add the features that are enabled
+			this.container.send('features',
+			{
+				sound: hasSound,
+				hints: !!this.hints,
+				music: hasSound && this.sound.contextExists('music'),
+				vo: hasSound && this.sound.contextExists('vo'),
+				sfx: hasSound && this.sound.contextExists('sfx'),
+				captions: !!this.captions
+			});
+		});
+
+		if (container.supported)
+		{
+			container.fetch('singlePlay', onSinglePlay.bind(this));
+			container.fetch('playOptions', onPlayOptions.bind(this));
+		}
+
+		// Handle errors gracefully
+		window.onerror = onWindowError.bind(this);
+
 		// Listen when the browser closes or redirects
 		window.onunload = window.onbeforeunload = onWindowUnload.bind(this);
 	};
 
-	// Handler for when a window is unloaded
+	/**
+	 * Handler for when a window is unloaded
+	 * @method  onWindowUnload
+	 * @private
+	 */
 	var onWindowUnload = function()
 	{
 		// Remove listener to not trigger twice
 		window.onunload = window.onbeforeunload = null;
 		this.endGame('left_site');
 		return undefined;
+	};
+
+	/**
+	 * Handle the window uncaught errors with the container
+	 * @method  onWindowError
+	 * @private
+	 * @param  {Error} error Uncaught Error
+	 */
+	var onWindowError = function(error)
+	{
+		// If the container is supported
+		// then handle the errors and pass to the container
+		if (this.container.supported)
+		{
+			if (true && window.console) console.error(error);
+			this.container.send('localError', String(error));
+			return false; // handle gracefully in release mode
+		}
 	};
 
 	// Check for application name
@@ -286,19 +317,13 @@
 			}
 		}
 
-		// Add the options to properties
-		this.singlePlay = !!this.options.singlePlay;
-		this.playOptions = this.options.playOptions ||
-		{};
+		// Connect the user data to container
+		this.userData.id = this.name;
 
 		// Merge the container options with the current
 		// application options
 		if (this.container.supported)
 		{
-			// Connect the user data to container
-			this.userData.id = this.name;
-			this.userData.container = this.container;
-
 			//Setup the container listeners for site soundMute and captionsMute events
 			this.container.on(
 			{
@@ -309,22 +334,7 @@
 				sfxMuted: onContextMuted.bind(this, 'sfx'),
 				captionsStyles: onCaptionsStyles.bind(this),
 				pause: onPause.bind(this),
-				singlePlay: onSinglePlay.bind(this),
-				playOptions: onPlayOptions.bind(this),
 				close: onClose.bind(this)
-			});
-
-			var hasSound = !!this.sound;
-
-			// Add the features that are enabled
-			this.container.send('features',
-			{
-				sound: hasSound,
-				hints: !!this.hints,
-				music: hasSound && this.sound.contextExists('music'),
-				vo: hasSound && this.sound.contextExists('vo'),
-				sfx: hasSound && this.sound.contextExists('sfx'),
-				captions: !!this.captions
 			});
 
 			// Turn off the page hide and show auto pausing the App
@@ -439,10 +449,11 @@
 	 * Handler when a application enters single play mode
 	 * @method onSinglePlay
 	 * @private
+	 * @param {event} e The Bellhop event
 	 */
-	var onSinglePlay = function()
+	var onSinglePlay = function(e)
 	{
-		this.singlePlay = true;
+		this.singlePlay = !!e.data;
 	};
 
 	/**
@@ -458,6 +469,8 @@
 	// Destroy the animator
 	plugin.teardown = function()
 	{
+		window.onerror = null;
+
 		if (this._pageVisibility)
 		{
 			this._pageVisibility.destroy();

@@ -9,12 +9,27 @@
 	var SoundInstance = include('springroll.SoundInstance');
 	var VOPlayer = include('springroll.VOPlayer');
 
+	/**
+	 * @class Sound
+	 */
 	// Reference to prototype
 	var p = Sound.prototype;
 
 	/**
-	 * @class Sound
+	 * If sound is supported on the device/browser, see {{#crossLink "springroll.Sound/isSupported:property"}}{{/crossLink}}
+	 * @property {Boolean} soundEnabled
+	 * @deprecated since version 0.4.10
 	 */
+	Object.defineProperty(p, "soundEnabled",
+	{
+		get: function()
+		{
+			if (DEBUG) console.warn("soundEnabled is now deprecated, please use isSupported instead.");
+			return this.isSupported;
+		}
+	});
+
+
 	/**
 	 * Add a configuration to the load, see {{#crossLink "springroll.Sound/addContext:method"}}{{/crossLink}}
 	 * @method loadConfig
@@ -103,7 +118,7 @@
 
 	/**
 	 * Get the current list of VO sounds, see {{#crossLink "springroll.VOPlayer/voList:property"}}{{/crossLink}}
-	 * @method soundList
+	 * @property soundList
 	 * @deprecated since version 0.4.0
 	 * @public
 	 */

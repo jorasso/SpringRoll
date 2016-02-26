@@ -99,6 +99,14 @@
 		setTimeout(this._preInit.bind(this), 0);
 	};
 
+	/**
+	 * The current version of the library
+	 * @property {String} version
+	 * @static
+	 * @readOnly
+	 */
+	Application.version = VERSION;
+
 	// Reference to the prototype
 	var s = EventDispatcher.prototype;
 	var p = EventDispatcher.extend(Application);
